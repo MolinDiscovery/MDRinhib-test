@@ -1,0 +1,11 @@
+name: MDRinhib-env-cpu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - ipykernel
+  - rdkit
+  - deepchem
+  - pip
+  - pip:
+    - tensorflow
