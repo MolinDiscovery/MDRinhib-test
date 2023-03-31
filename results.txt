@@ -1,1 +1,1 @@
-Parameters: {}
+Parameters: {'number_atom_features': 211, 'learning_rate': 0.001050532827136777, 'batch_size': 195, 'dense_layer_size': 359}
