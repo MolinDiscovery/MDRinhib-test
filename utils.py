@@ -1,4 +1,6 @@
+from fileinput import filename
 import pandas as pd
+import numpy as np
 from deepchem import deepchem as dc
 
 def load_data(datafile: str, MolWt: int, first_index: bool) -> pd.DataFrame:
@@ -125,7 +127,7 @@ def set_seed(seed, tensorflow=True, pytorch=True):
         print("You must import numpy as np and random to set up seeds.")
 
 
-def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1):
+def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1, model_name="model"):
     """
     Train a model using early stopping based on the performance on a validation dataset.
 
@@ -138,11 +140,24 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
     - nb_epoch (int, optional): The maximum number of epochs for training. Defaults to 100.
     - patience (int, optional): The number of epochs to wait without improvement before stopping the training. Defaults to 3.
     - interval (int, optional): The interval (in epochs) between validation checks. Defaults to 1.
+    - model_name (str, optional): The name used to when saving the model. Defaults to "model".
 
     Returns:
-    - list: A list of tuples containing the epoch number, validation score, and training score for each validation check.
+    - list: A list of tuples containing the epoch number, validation score, and training score for each validation epoch.
+
     """
-    
+    import copy
+    import os
+
+    def get_unique_model_filename(prefix=model_name, suffix=".ckpt"):
+        counter = 1
+        while True:
+            filename = f"{prefix}{counter:02d}{suffix}"
+            if not os.path.exists(os.path.join("models", filename)):
+                return filename
+            counter += 1
+
+    best_model = None
     best_score = None
     best_epoch = None
     list_scores = []
@@ -165,7 +180,7 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
             if best_score is None or valid_score < best_score:
                 best_score = valid_score
                 best_epoch = epoch + 1
-                model.save_checkpoint(model_dir="model.ckpt")
+                best_model = copy.deepcopy(model)
                 wait = 0
             else:
                 wait += 1
@@ -174,6 +189,11 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
                     break
     
     print(f"Best model found at epoch {best_epoch} with {metric[0].name} score: {best_score}")
+
+    unique_filename = get_unique_model_filename()
+    os.makedirs("models", exist_ok=True)
+    best_model.save_checkpoint(model_dir=os.path.join("models", unique_filename))
+
     return list_scores
 
 def plot_predictions(model, training_data, test_data, transformer):
@@ -187,10 +207,11 @@ def plot_predictions(model, training_data, test_data, transformer):
     plt.plot(train_plot, train_plot, label='True values')
     plt.scatter(train_plot, train_preds, marker='.', label='train preds')
     plt.scatter(test_plot, test_preds, marker='.', label='test preds')
+    plt.gca().set(xlabel='Docking scores (true)', ylabel='Docking scores(predict)', title='Predictions')
     plt.legend()
 
 
-def plot_validation(trained_model):
+def plot_validation(trained_model, metric):
     from matplotlib import pyplot as plt
     
     epochs = [x[0] for x in trained_model]
@@ -203,3 +224,27 @@ def plot_validation(trained_model):
     plt.xticks(range(min(epochs), max(epochs) + 1, 4))
     plt.legend()
     plt.show
+
+def eval(model, test_data, transformer=[]):
+    metrics = [
+        dc.metrics.Metric(dc.metrics.r2_score),
+        dc.metrics.Metric(dc.metrics.rms_score),
+        dc.metrics.Metric(dc.metrics.mean_absolute_error),
+    ]
+
+    dc_eval = model.evaluate(test_data, metrics, transformer)
+    
+    rmse = dc_eval.get('rms_score')
+    r2 = dc_eval.get('r2_score')
+    mae = dc_eval.get('mean_absolute_error')
+    
+    preds = model.predict(test_data, transformer).flatten()
+    mean = np.mean(preds)
+    std = np.std(preds)
+
+    score_names = ['RMSE', 'R2  ', 'MAE ', 'mean', 'std ']
+    scores_values = [rmse, r2, mae, mean, std]
+    scores = zip(score_names, scores_values)
+
+    for i, j in scores:
+        print(i, "  |", round(j, 3))
