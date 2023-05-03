@@ -1,11 +1,13 @@
 from fileinput import filename
 import pandas as pd
 import numpy as np
+import os
 from deepchem import deepchem as dc
 
 def load_data(datafile: str, MolWt: int, first_index: bool) -> pd.DataFrame:
     """
     Loads molecular data from a CSV file, processes it, and returns a pandas DataFrame with a specified molecular weight threshold.
+    The dataset must contain a column called SMILES with smile strings.
 
     Parameters:
     - datafile (str): The path to the input CSV data file containing molecular data.
@@ -127,7 +129,7 @@ def set_seed(seed, tensorflow=True, pytorch=True):
         print("You must import numpy as np and random to set up seeds.")
 
 
-def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1, model_name="model"):
+def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1, high_is_better=True, model_name="model"):
     """
     Train a model using early stopping based on the performance on a validation dataset.
 
@@ -141,13 +143,14 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
     - patience (int, optional): The number of epochs to wait without improvement before stopping the training. Defaults to 3.
     - interval (int, optional): The interval (in epochs) between validation checks. Defaults to 1.
     - model_name (str, optional): The name used to when saving the model. Defaults to "model".
-
+    - high_is_better(bool, optional): Set this to True if higher scores are better (R2) or False if low scores are better (RMSE)
+    
     Returns:
     - list: A list of tuples containing the epoch number, validation score, and training score for each validation epoch.
 
+    Note: Use only for deep learning models. (Not RF etc.)
     """
     import copy
-    import os
 
     def get_unique_model_filename(prefix=model_name, suffix=".ckpt"):
         counter = 1
@@ -177,7 +180,12 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
 
             list_scores.append((epoch + 1, valid_score, training_score))
 
-            if best_score is None or valid_score < best_score:
+            if high_is_better:
+                condition = best_score is None or valid_score > best_score
+            else:
+                condition = best_score is None or valid_score < best_score            
+
+            if condition:
                 best_score = valid_score
                 best_epoch = epoch + 1
                 best_model = copy.deepcopy(model)
@@ -248,3 +256,18 @@ def eval(model, test_data, transformer=[]):
 
     for i, j in scores:
         print(i, "  |", round(j, 3))
+
+def save_rf_model(model, model_name):
+    from joblib import dump
+
+    def get_unique_model_filename(prefix=model_name, suffix=".joblib"):
+        counter = 1
+        while True:
+            filename = f"{prefix}{counter:02d}{suffix}"
+            if not os.path.exists(os.path.join("models", filename)):
+                return filename
+            counter += 1
+
+    unique_filename = get_unique_model_filename()
+    os.makedirs("models", exist_ok=True)
+    dump(model.model, os.path.join("models", unique_filename))
