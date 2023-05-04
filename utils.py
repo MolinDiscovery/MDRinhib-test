@@ -4,6 +4,57 @@ import numpy as np
 import os
 from deepchem import deepchem as dc
 
+#####################
+#      Classes      #
+#####################
+class DoNothingTransformer(dc.trans.Transformer):
+    def __init__(self, **kwargs):
+        super(DoNothingTransformer, self).__init__(**kwargs)
+
+    def transform_array(self, X, y, w, ids):
+        """
+        This method does nothing and returns the input data as it is.
+
+        Parameters
+        ----------
+        X : numpy.ndarray
+            Features
+        y : numpy.ndarray
+            Labels
+        w : numpy.ndarray
+            Weights
+        ids : numpy.ndarray
+            IDs
+
+        Returns
+        -------
+        tuple
+            A tuple containing the unchanged input data (X, y, w, ids)
+        """
+        
+        return X, y, w, ids
+    
+    def untransform(self, data):
+        """
+        This method does nothing and returns the input data as it is.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data that was previously transformed (or not transformed) by this class
+
+        Returns
+        -------
+        numpy.ndarray
+            The unchanged input data
+        """
+        return data
+
+
+#####################
+#     Functions     #
+#####################
+
 def load_data(datafile: str, MolWt: int, first_index: bool) -> pd.DataFrame:
     """
     Loads molecular data from a CSV file, processes it, and returns a pandas DataFrame with a specified molecular weight threshold.
@@ -23,7 +74,7 @@ def load_data(datafile: str, MolWt: int, first_index: bool) -> pd.DataFrame:
     df = pd.read_csv(datafile)
 
     if first_index == True:
-        df = df.set_index('1')
+        df = df.set_index(df.columns[0])
 
     if 'molecules' not in df.columns:
         df['molecules'] = df['SMILES'].apply(Chem.MolFromSmiles)
@@ -37,7 +88,7 @@ def load_data(datafile: str, MolWt: int, first_index: bool) -> pd.DataFrame:
     return df
 
 
-def receptor_data(df, receptor_name, featurizer=dc.feat.ConvMolFeaturizer(), seed=1):
+def receptor_data(df,receptor_name, featurizer=dc.feat.ConvMolFeaturizer(), seed=1, input_transformer=dc.trans.NormalizationTransformer):
     '''
     This function takes a DataFrame containing data for multiple receptors, processes it, and returns training, validation, and test datasets that can be used in a DeepChem model.
 
@@ -46,6 +97,10 @@ def receptor_data(df, receptor_name, featurizer=dc.feat.ConvMolFeaturizer(), see
     - receptor_name (str): The name of the receptor for which the data is to be processed.
     - featurizer (dc.feat): The featurizer to use. Defaults to ConvMolFeaturizer(). To use another the use MolGraphConvFeaturizer use dc.feat.MolGraphConvFeaturizer().
     - seed (int, optional): The random seed for splitting the data into train, validation, and test sets. Default is 1.
+    - transformer (dc.trans.NormalizationTransformer, optional): set the DeepChem transformer to use. Defaults to NormalizationTransformer.
+      Please note you can set this to `transformer=utils.DoNothingTransformer` which avoids any transformation altogether;
+      assuming you imported this file as utils.
+      Also note that the transformer transforms the y-values not the X-values.
     
     Returns:
     - train_dataset (dc.data.NumpyDataset): A DeepChem NumpyDataset object containing the training data.
@@ -71,7 +126,7 @@ def receptor_data(df, receptor_name, featurizer=dc.feat.ConvMolFeaturizer(), see
     dataset = dc.data.NumpyDataset(X=X, y=y, ids=ids)
 
     # Transform the output data for regression
-    transformer = dc.trans.NormalizationTransformer(transform_y=True, dataset=dataset)
+    transformer = input_transformer(transform_y=True, dataset=dataset)
     dataset = transformer.transform(dataset)
 
     # split data
@@ -142,8 +197,8 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
     - nb_epoch (int, optional): The maximum number of epochs for training. Defaults to 100.
     - patience (int, optional): The number of epochs to wait without improvement before stopping the training. Defaults to 3.
     - interval (int, optional): The interval (in epochs) between validation checks. Defaults to 1.
+    - high_is_better(bool, optional): Set this to True if higher scores are better (R2) or False if low scores are better (RMSE). Default to True.
     - model_name (str, optional): The name used to when saving the model. Defaults to "model".
-    - high_is_better(bool, optional): Set this to True if higher scores are better (R2) or False if low scores are better (RMSE)
     
     Returns:
     - list: A list of tuples containing the epoch number, validation score, and training score for each validation epoch.
@@ -203,6 +258,69 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
     best_model.save_checkpoint(model_dir=os.path.join("models", unique_filename))
 
     return list_scores
+
+
+def fit_best_tf(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1, high_is_better=True, model_name="model"):
+    def get_unique_model_filename(prefix=model_name, suffix=".ckpt"):
+        counter = 1
+        while True:
+            filename = f"{prefix}{counter:02d}{suffix}"
+            if not os.path.exists(os.path.join("models", filename)):
+                return filename
+            counter += 1
+
+    def get_best_model_weights(model):
+        return model.model.get_weights()
+
+    def set_best_model_weights(model, best_model_weights):
+        model.model.set_weights(best_model_weights)
+
+    best_score = None
+    best_epoch = None
+    best_model_weights = None
+    list_scores = []
+    wait = 0
+
+    for epoch in range(nb_epoch):
+        print(f"Epoch {epoch+1}/{nb_epoch}")
+        model.fit(train_dataset, nb_epoch=1)
+
+        if (epoch + 1) % interval == 0:
+            valid_scores = model.evaluate(valid_dataset, metric, transformers)
+            valid_score = valid_scores[metric[0].name]
+            print(valid_scores)
+
+            training_scores = model.evaluate(train_dataset, metric, transformers)
+            training_score = training_scores[metric[0].name]
+
+            list_scores.append((epoch + 1, valid_score, training_score))
+
+            if high_is_better:
+                condition = best_score is None or valid_score > best_score
+            else:
+                condition = best_score is None or valid_score < best_score
+
+            if condition:
+                best_score = valid_score
+                best_epoch = epoch + 1
+                best_model_weights = get_best_model_weights(model)
+                wait = 0
+            else:
+                wait += 1
+                if wait >= patience:
+                    print("Early stopping triggered at epoch:", epoch + 1)
+                    break
+
+    print(f"Best model found at epoch {best_epoch} with {metric[0].name} score: {best_score}")
+
+    set_best_model_weights(model, best_model_weights)
+
+    unique_filename = get_unique_model_filename()
+    os.makedirs("models", exist_ok=True)
+    model.save_checkpoint(model_dir=os.path.join("models", unique_filename))
+
+    return list_scores
+
 
 def plot_predictions(model, training_data, test_data, transformer):
     from matplotlib import pyplot as plt
