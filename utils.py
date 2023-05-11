@@ -13,7 +13,7 @@ class DoNothingTransformer(dc.trans.Transformer):
 
     def transform_array(self, X, y, w, ids):
         """
-        This method does nothing and returns the input data as it is.
+        This method does nothing and returns the input data as it is. Use this in case you don't want to have your data transformed.
 
         Parameters
         ----------
@@ -184,10 +184,11 @@ def set_seed(seed, tensorflow=True, pytorch=True):
         print("You must import numpy as np and random to set up seeds.")
 
 
-def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1, high_is_better=True, model_name="model"):
+def fit_best_pt(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1, high_is_better=True, model_name="model"):
     """
-    Train a model using early stopping based on the performance on a validation dataset.
-
+    Train a deepchem(PyTorch) model using early stopping based on the performance on a validation dataset.
+    Please use the fit_best_tf for tensorflow models.
+    
     Parameters:
     - model: The model to be trained.
     - train_dataset (dc.data.Dataset): The training dataset.
@@ -203,7 +204,7 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
     Returns:
     - list: A list of tuples containing the epoch number, validation score, and training score for each validation epoch.
 
-    Note: Use only for deep learning models. (Not RF etc.)
+    Note: Use only for PyTorch deepchem models (Not RF, tensorflow etc.). Please use the fit_best_tf for tensorflow models.
     """
     import copy
 
@@ -261,6 +262,27 @@ def fit_best_model(model, train_dataset, valid_dataset, metric, transformers, nb
 
 
 def fit_best_tf(model, train_dataset, valid_dataset, metric, transformers, nb_epoch=100, patience=3, interval=1, high_is_better=True, model_name="model"):
+    """
+    Train a TensorFlow model using early stopping based on the performance on a validation dataset.
+
+    Parameters:
+    - model: The TensorFlow model to be trained.
+    - train_dataset (dc.data.Dataset): The training dataset.
+    - valid_dataset (dc.data.Dataset): The validation dataset.
+    - metric (dc.metrics.Metric): The metric used to evaluate the model's performance.
+    - transformers (list): A list of transformers applied to the dataset.
+    - nb_epoch (int, optional): The maximum number of epochs for training. Defaults to 100.
+    - patience (int, optional): The number of epochs to wait without improvement before stopping the training. Defaults to 3.
+    - interval (int, optional): The interval (in epochs) between validation checks. Defaults to 1.
+    - high_is_better(bool, optional): Set this to True if higher scores are better (R2) or False if low scores are better (RMSE). Default to True.
+    - model_name (str, optional): The name used when saving the model. Defaults to "model".
+    
+    Returns:
+    - list: A list of tuples containing the epoch number, validation score, and training score for each validation epoch.
+
+    Note: Use only for deepchem models using TensorFlow (Not suitable for PyTorch, RandomForest, etc.). Please use the fit_best_pt for PyTorch models.
+    """
+    
     def get_unique_model_filename(prefix=model_name, suffix=".ckpt"):
         counter = 1
         while True:
